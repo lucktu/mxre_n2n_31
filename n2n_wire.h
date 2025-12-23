@@ -153,6 +153,8 @@ struct n2n_REGISTER_SUPER
     n2n_auth_t          auth;           /* Authentication scheme and tokens */
     char                version[16];    /* edge version string */
     char                os_name[16];    /* operating system name */
+    uint8_t             request_ip;     /* Request IP allocation flag */
+    uint32_t            requested_ip;   /* Requested IP address */
 };
 
 typedef struct n2n_REGISTER_SUPER n2n_REGISTER_SUPER_t;
@@ -170,14 +172,19 @@ struct n2n_REGISTER_SUPER_ACK
      * uint8_t count, then for each count there is one
      * n2n_sock_t.
      */
-    uint8_t             num_sn;         /* Number of supernodes that were send
-                                         * even if we cannot store them all. If
-                                         * non-zero then sn_bak is valid. */
-    n2n_sock_t          sn_bak;         /* Socket of the first backup supernode */
-    char                version[16];    /* supernode version string */
-    char                os_name[16];    /* supernode OS name */
+    uint8_t             num_sn;           /* Number of supernodes that were send
+                                           * even if we cannot store them all. If
+                                           * non-zero then sn_bak is valid. */
+    n2n_sock_t          sn_bak;           /* Socket of the first backup supernode */
+    char                version[16];      /* supernode version string */
+    char                os_name[16];      /* supernode OS name */
     uint8_t             sn_ipv4_support;  /* 0=not supported, 1=supported */
     uint8_t             sn_ipv6_support;  /* 0=not supported, 1=supported */
+    uint32_t            assigned_ip;      /* Assigned IP address */
+    uint8_t             peer_count;       /* Number of members in the same group */
+    n2n_mac_t           peer_macs[16];    /* List of MAC addresses of group members */
+    uint32_t            peer_ips[16];     /* List of IP addresses of group members */
+    n2n_sock_t          peer_pub_ips[16]; /* List of public IP addresses of group members */
 };
 
 typedef struct n2n_REGISTER_SUPER_ACK n2n_REGISTER_SUPER_ACK_t;

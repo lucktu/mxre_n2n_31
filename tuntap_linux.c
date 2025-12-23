@@ -144,7 +144,7 @@ static int set_device_state(const tuntap_dev* device, bool up) {
     return 0;
 }
 
-static int set_ipaddress(const tuntap_dev* device, int static_address) {
+int set_ipaddress(const tuntap_dev* device, int static_address) {
     int ifnum = if_nametoindex(device->dev_name);
     traceEvent(TRACE_DEBUG, "if_nametoindex(%s) %d\n", device->dev_name, ifnum);
 

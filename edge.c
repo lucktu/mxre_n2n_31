@@ -23,6 +23,7 @@
  *
  */
 
+
 #include "n2n.h"
 #include "n2n_transforms.h"
 #include "speck.h"
@@ -101,6 +102,9 @@ typedef char n2n_sn_name_t[N2N_EDGE_SN_HOST_SIZE];
 #define N2N_EDGE_NUM_SUPERNODES 3
 #define N2N_EDGE_SUP_ATTEMPTS   3       /* Number of failed attmpts before moving on to next supernode. */
 
+static int first_ip_report_shown = 0;
+static int default_ip_assignment = 0;
+static int assigned_ip_suffix = 1;
 
 /** Main structure type for edge. */
 struct n2n_edge
@@ -631,6 +635,7 @@ static void help() {
 
     printf("Usage: edge [config_file] <options>\n");
     printf("or: edge -d <tun device> -a <tun IP address> -c <community> -k <encrypt key> -l <supernode host:port>\n");
+    printf("or: edge -c <community> (default: -d n2nx -a 10.64.0.x -k disable -l ouno.eu.org:10084, unsafe, not recommended)\n");
     printf("\n");
 
 #if N2N_CAN_NAME_IFACE && !defined(_WIN32)
@@ -639,6 +644,7 @@ static void help() {
     printf("-d <tun device>          | tun device name (optional)\n");
 #endif
     printf("-a <mode:IPv4/prefixlen> | Set interface IPv4 address. For DHCP use '-r -a dhcp:0.0.0.0/0'\n");
+    printf("                         : If not specified, auto-assigns 10.64.0.x from supernode\n");  
     printf("-A <IPv6>/<prefixlen>    | Set interface IPv6 address, only supported if IPv4 set to 'static'\n");
     printf("-c <community>           | n2n community name the edge belongs to.\n");
     printf("-B <mode>                | Encryption:");
@@ -752,7 +758,7 @@ static void send_register( n2n_edge_t * eee,
 
 /** Send a REGISTER_SUPER packet to the current supernode. */
 static void send_register_super( n2n_edge_t * eee,
-    const n2n_sock_t * supernode)
+                                const n2n_sock_t * supernode)
 {
     uint8_t pktbuf[N2N_PKT_BUF_SIZE];
     size_t idx;
@@ -775,8 +781,21 @@ static void send_register_super( n2n_edge_t * eee,
     strncpy(reg.version, n2n_sw_version, sizeof(reg.version) - 1);
     strncpy(reg.os_name, n2n_sw_osName, sizeof(reg.os_name) - 1);
 
+    if (default_ip_assignment) {
+        reg.request_ip = 1;
+        reg.requested_ip = htonl(0x0a400002); // Request 10.64.0.2
+    }
+
     idx=0;
     encode_mac( reg.edgeMac, &idx, eee->device.mac_addr );
+
+    if (default_ip_assignment) {
+        reg.request_ip = 1;
+        reg.requested_ip = htonl(0x0a400001 + assigned_ip_suffix); /* 10.64.0.x */
+    } else {
+        reg.request_ip = 0;
+        reg.requested_ip = 0;
+    }
 
     idx=0;
     encode_REGISTER_SUPER( pktbuf, &idx, &cmn, &reg );
@@ -2026,6 +2045,54 @@ static void readFromIPSocket( n2n_edge_t * eee )
 									          	eee->sn_wait=0;
 									          	eee->sup_attempts = N2N_EDGE_SUP_ATTEMPTS; /* refresh because we got a response */
 
+									          	if (default_ip_assignment && ra.assigned_ip != 0) {
+  									          	  uint32_t assigned_ip = ntohl(ra.assigned_ip);
+   									          	 char assigned_ip_str[16];
+
+   									          	snprintf(assigned_ip_str, sizeof(assigned_ip_str),
+        									          	      "10.64.0.%u", assigned_ip & 0xFF);
+
+   									          	 struct in_addr addr;
+   									          	 inet_pton(AF_INET, assigned_ip_str, &addr);
+
+   									          	 /* Only show report on first time or when IP changes */
+   									          	 int ip_changed = (eee->device.ip_addr != addr.s_addr);
+
+   									          	 if (ip_changed) {
+       									          	 eee->device.ip_addr = addr.s_addr;
+
+        									          	if (set_ipaddress(&eee->device, 1) < 0) {
+         									          	   traceEvent(TRACE_ERROR, "Failed to configure TAP interface with assigned IP");
+       									          	 } else {
+          									          	  traceEvent(TRACE_NORMAL, "TAP interface configured with IP %s", assigned_ip_str);
+        									          	}
+   									          	 }
+
+  									          	  /* Only show report on first time or when IP changes */
+   									          	 if (!first_ip_report_shown || ip_changed) {
+     									          	   traceEvent(TRACE_NORMAL, "============== IP Assignment Report ==============");
+        									          	traceEvent(TRACE_NORMAL, "Assigned IP: %s", assigned_ip_str);
+
+       									          	 if (ra.peer_count > 0) {
+           									          	 traceEvent(TRACE_NORMAL, "Community members (%u):", ra.peer_count);
+           									          	 for (int i = 0; i < ra.peer_count && i < 16; i++) {
+            									          	    macstr_t mac_buf;
+               									          	 uint32_t peer_ip = ntohl(ra.peer_ips[i]);
+               									          	 char peer_ip_str[16];
+              									          	  n2n_sock_str_t pub_ip_str;
+
+              									          	  snprintf(peer_ip_str, sizeof(peer_ip_str), "10.64.0.%u", peer_ip & 0xFF);
+
+               									          	 traceEvent(TRACE_NORMAL, "  Private IP: %s, Public IP: %s",
+                        									          	   peer_ip_str,
+                        									          	   sock_to_cstr(pub_ip_str, &ra.peer_pub_ips[i]));
+           									          	 }
+       									          	 }
+
+       									          	 first_ip_report_shown = 1;
+   									          	 }
+									          	}
+
 									          	if (first_ok_message_shown == 0) {
 										          		traceEvent(TRACE_NORMAL, "[OK] Edge Peer <<< =======64======= >>> Super Node");
 												          first_ok_message_shown = 1;
@@ -2071,7 +2138,6 @@ static void readFromIPSocket( n2n_edge_t * eee )
     {
         traceEvent(TRACE_WARNING, "Received packet with invalid community");
     }
-
 }
 
 /* ***************************************************** */
@@ -2606,9 +2672,15 @@ if (argc > 1 && argv[1][0] != '-' && access(argv[1], R_OK) == 0) {
         }
         case 'a': /* IP address and mode of TUNTAP interface */
         {
-            scan_address(ip_addr, N2N_NETMASK_STR_SIZE,
-                         ip_mode, N2N_IF_MODE_SIZE,
-                         &ip_prefixlen, optarg );
+            if (optarg && strlen(optarg) > 0) {
+                scan_address(ip_addr, N2N_NETMASK_STR_SIZE,
+                             ip_mode, N2N_IF_MODE_SIZE,
+                             &ip_prefixlen, optarg );
+            } else {
+                default_ip_assignment = 1;
+                strcpy(ip_mode, "static");
+                ip_prefixlen = 24;
+            }
             break;
         }
         case 'A': /* IP address and mode of TUNTAP interface */
@@ -2742,6 +2814,13 @@ if (argc > 1 && argv[1][0] != '-' && access(argv[1], R_OK) == 0) {
         eee.sn_num = 1;
     }
 
+    if (default_ip_assignment == 0 && strlen(ip_addr) == 0) {
+        // No -a parameter provided at all - use default IP assignment
+        default_ip_assignment = 1;
+        strcpy(ip_mode, "static");
+        ip_prefixlen = 24;
+    }
+
 #ifdef HAVE_LIBCAP
     /* set effective capability to set uid/gid */
     caps = cap_init();
@@ -2767,13 +2846,16 @@ if (argc > 1 && argv[1][0] != '-' && access(argv[1], R_OK) == 0) {
 
     srand((unsigned int) time(NULL));
 
+    if (inet_pton(AF_INET, ip_addr, &tuntap_config.ip_addr) != 1) {
+        traceEvent(TRACE_ERROR, "invalid ipv4 address: %s", ip_addr);
+    }
+
     if(!(
 #if N2N_CAN_NAME_IFACE && !defined(_WIN32)
         /* windows can use a default */
         (tuntap_dev_name[0] != 0) &&
 #endif
-        (eee.community_name[0] != 0) &&
-        (ip_addr[0] != 0)
+        (eee.community_name[0] != 0)
     ) ) {
         help();
         exit(1);
@@ -2869,8 +2951,10 @@ if (argc > 1 && argv[1][0] != '-' && access(argv[1], R_OK) == 0) {
     }
     tuntap_config.mtu = mtu;
     tuntap_config.dyn_ip4 = eee.dyn_ip_mode;
-    if (inet_pton(AF_INET, ip_addr, &tuntap_config.ip_addr) != 1) {
-         traceEvent(TRACE_ERROR, "invalid ipv4 address: %s", ip_addr);
+    if (strlen(ip_addr) > 0) {
+        if (inet_pton(AF_INET, ip_addr, &tuntap_config.ip_addr) != 1) {
+             traceEvent(TRACE_ERROR, "invalid ipv4 address: %s", ip_addr);
+        }
     }
     tuntap_config.ip_prefixlen = ip_prefixlen;
 

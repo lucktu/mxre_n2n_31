@@ -38,6 +38,7 @@
 #endif
 
 static unsigned int count_communities(struct peer_info *edges);
+static uint32_t next_assigned_ip = 0x0a400002; /* 10.64.0.2 */
 
 struct sn_stats
 {
@@ -70,6 +71,41 @@ struct n2n_sn
 
 typedef struct n2n_sn n2n_sn_t;
 
+static void collect_community_peers(n2n_sn_t * sss,
+                                   const n2n_community_t community,
+                                   n2n_REGISTER_SUPER_ACK_t * ack)
+{
+    struct peer_info * scan = sss->edges;
+    int count = 0;
+
+    while (scan && count < 16) {
+        /* Only include valid peers with assigned IPs, non-zero MACs, and valid public IPs */
+        if (memcmp(scan->community_name, community, N2N_COMMUNITY_SIZE) == 0 &&
+            scan->assigned_ip != 0 &&
+            memcmp(scan->mac_addr, "\x00\x00\x00\x00\x00\x00", 6) != 0 &&
+            scan->sock.family != 0 && /* Check for valid socket family */
+            scan->sock.port != 0) {   /* Check for valid port */
+
+            memcpy(ack->peer_macs[count], scan->mac_addr, N2N_MAC_SIZE);
+            ack->peer_ips[count] = htonl(scan->assigned_ip);
+            ack->peer_pub_ips[count] = scan->sock;
+            count++;
+        }
+        scan = scan->next;
+    }
+
+    ack->peer_count = count;
+}
+
+static int update_edge( n2n_sn_t * sss,
+                        const n2n_mac_t edgeMac,
+                        const n2n_community_t community,
+                        const n2n_sock_t * sender_sock,
+                        time_t now,
+                        const char * version,
+                        const char * os_name,
+                        uint8_t request_ip,
+                        uint32_t requested_ip );
 
 static int try_forward( n2n_sn_t * sss,
                         const n2n_common_t * cmn,
@@ -315,7 +351,9 @@ static int update_edge( n2n_sn_t * sss,
                         const n2n_sock_t * sender_sock,
                         time_t now,
                         const char * version,
-                        const char * os_name)
+                        const char * os_name,
+                        uint8_t request_ip,
+                        uint32_t requested_ip )
 {
     macstr_t            mac_buf;
     n2n_sock_str_t      sockbuf;
@@ -332,6 +370,17 @@ static int update_edge( n2n_sn_t * sss,
         /* Not known */
 
         scan = (struct peer_info*)calloc(1, sizeof(struct peer_info)); /* deallocated in purge_expired_registrations */
+
+        if (request_ip) {
+            uint32_t assigned_ip = next_assigned_ip++;
+            traceEvent(TRACE_INFO, "Auto-assigning IP 10.64.0.%u to edge %s",
+                       assigned_ip & 0xFF, macaddr_str(mac_buf, edgeMac));
+            scan->assigned_ip = assigned_ip;
+
+            if ((assigned_ip & 0xFF) > 254) {
+                next_assigned_ip = 0x0a400002;
+            }
+        }
 
         memcpy(scan->community_name, community, sizeof(n2n_community_t) );
         memcpy(&(scan->mac_addr), edgeMac, sizeof(n2n_mac_t));
@@ -441,7 +490,6 @@ static ssize_t sendto_sock(n2n_sn_t * sss,
         return -1;
     }
 }
-
 
 
 /** Try to forward a message to a unicast MAC. If the MAC is unknown then
@@ -955,7 +1003,7 @@ static int process_udp( n2n_sn_t * sss,
                     sock_to_cstr( sockbuf, &(ack.sock) ) );
 
         update_edge( sss, reg.edgeMac, cmn.community, &(ack.sock), now,
-                     reg.version, reg.os_name );
+                     reg.version, reg.os_name, reg.request_ip, reg.requested_ip );
 
         strncpy(ack.version, n2n_sw_version, sizeof(ack.version) - 1);
         strncpy(ack.os_name, n2n_sw_osName, sizeof(ack.os_name) - 1);
@@ -963,6 +1011,17 @@ static int process_udp( n2n_sn_t * sss,
         /* Set IP support capability flags */
         ack.sn_ipv4_support = (sss->ipv4_available ? 1 : 0);
         ack.sn_ipv6_support = (sss->ipv6_available ? 1 : 0);
+
+        /* Collect community member information */
+        if (reg.request_ip) {
+            collect_community_peers(sss, cmn.community, &ack);
+
+            /* Set assigned IP */
+            struct peer_info *edge_peer = find_peer_by_mac(sss->edges, reg.edgeMac);
+            if (edge_peer && edge_peer->assigned_ip) {
+                ack.assigned_ip = htonl(edge_peer->assigned_ip);
+            }
+        }
 
         encode_REGISTER_SUPER_ACK( ackbuf, &encx, &cmn2, &ack );
 
@@ -979,8 +1038,6 @@ static int process_udp( n2n_sn_t * sss,
                     sock_to_cstr( sockbuf, &(ack.sock) ) );
 
     }
-
-
     return 0;
 }
 

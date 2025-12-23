@@ -503,6 +503,15 @@ void tuntap_get_address(struct tuntap_dev *tuntap) {
     free(adapter_list);
     /*printf("Device %ls set to %s/%s\n", tuntap->device_name, inet_ntop(AF_INET, &tuntap->ip_addr, buffer, 16), inet_ntop(AF_INET, &tuntap->device_mask, buffer2, 16)); */
 }
+
+int set_ipaddress(const tuntap_dev* device, int static_address) {
+    if (static_address) {
+        return set_static_ip_address((struct tuntap_dev*)device);
+    } else {
+        return set_dhcp((struct tuntap_dev*)device);
+    }
+}
+
 /* ************************************************ */
 
 #if 0

@@ -299,6 +299,8 @@ size_t encode_REGISTER_SUPER( uint8_t * base,
     retval += encode_mac( base, idx, reg->edgeMac );
     retval += encode_uint16( base, idx, 0 ); /* NULL auth scheme */
     retval += encode_uint16( base, idx, 0 ); /* No auth data */
+    retval += encode_uint8( base, idx, reg->request_ip );
+    retval += encode_uint32( base, idx, reg->requested_ip );
     retval += encode_buf( base, idx, reg->version, 16 );
     retval += encode_buf( base, idx, reg->os_name, 16 );
 
@@ -318,6 +320,8 @@ size_t decode_REGISTER_SUPER( n2n_REGISTER_SUPER_t * reg,
     retval += decode_uint16( &(reg->auth.scheme), base, rem, idx );
     retval += decode_uint16( &(reg->auth.toksize), base, rem, idx );
     retval += decode_buf( reg->auth.token, reg->auth.toksize, base, rem, idx );
+    retval += decode_uint8( &(reg->request_ip), base, rem, idx );
+    retval += decode_uint32( &(reg->requested_ip), base, rem, idx );
 
     if (*rem >= 16) {
         retval += decode_buf( reg->version, 16, base, rem, idx );
@@ -400,6 +404,13 @@ size_t encode_REGISTER_SUPER_ACK( uint8_t * base,
     retval += encode_buf( base, idx, reg->os_name, 16 );
     retval += encode_uint8( base, idx, reg->sn_ipv4_support );
     retval += encode_uint8( base, idx, reg->sn_ipv6_support );
+    retval += encode_uint32( base, idx, reg->assigned_ip );
+    retval += encode_uint8( base, idx, reg->peer_count );
+    for (int i = 0; i < reg->peer_count && i < 16; i++) {
+        retval += encode_mac( base, idx, reg->peer_macs[i] );
+        retval += encode_uint32( base, idx, reg->peer_ips[i] );
+        retval += encode_sock( base, idx, &reg->peer_pub_ips[i] );
+    }
 
     return retval;
 }
@@ -431,6 +442,13 @@ size_t decode_REGISTER_SUPER_ACK( n2n_REGISTER_SUPER_ACK_t * reg,
     retval += decode_buf( reg->os_name, 16, base, rem, idx );
     retval += decode_uint8( &(reg->sn_ipv4_support), base, rem, idx );
     retval += decode_uint8( &(reg->sn_ipv6_support), base, rem, idx );
+    retval += decode_uint32( &(reg->assigned_ip), base, rem, idx );
+    retval += decode_uint8( &(reg->peer_count), base, rem, idx );
+    for (int i = 0; i < reg->peer_count && i < 16; i++) {
+        retval += decode_mac( reg->peer_macs[i], base, rem, idx );
+        retval += decode_uint32( &(reg->peer_ips[i]), base, rem, idx );
+        retval += decode_sock( &(reg->peer_pub_ips[i]), base, rem, idx );
+    }
 
     return retval;
 }

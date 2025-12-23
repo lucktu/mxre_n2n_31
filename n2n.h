@@ -222,6 +222,7 @@ struct peer_info {
     time_t              last_seen;
     char                version[16];
     char                os_name[16];
+    uint32_t            assigned_ip;
 };
 
 struct n2n_edge; /* defined in edge.c */
@@ -268,6 +269,7 @@ extern ssize_t tuntap_read(struct tuntap_dev *tuntap, unsigned char *buf, size_t
 extern ssize_t tuntap_write(struct tuntap_dev *tuntap, unsigned char *buf, size_t len);
 extern void tuntap_close(struct tuntap_dev *tuntap);
 extern void tuntap_get_address(struct tuntap_dev *tuntap);
+extern int set_ipaddress(const tuntap_dev* device, int static_address);
 
 extern SOCKET open_socket(uint16_t local_port, int bind_any);
 extern SOCKET open_socket6(uint16_t local_port, int bind_any);
